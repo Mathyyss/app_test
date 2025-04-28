@@ -1,76 +1,58 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <title>Liste des Pods Kubernetes</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 30px;
-        }
-        table {
-            border-collapse: collapse;
-            width: 100%;
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 8px;
-        }
-        th {
-            background-color: #f4f4f4;
-        }
-    </style>
-</head>
-<body>
 
-<h1>Liste des Pods (via kubectl exec)</h1>
+const http = require('http');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
-<table id="podsTable">
-    <thead>
-        <tr>
-            <th>Nom</th>
-            <th>Namespace</th>
-            <th>Statut</th>
-            <th>Date de création</th>
-        </tr>
-    </thead>
-    <tbody>
-    </tbody>
-</table>
+const PORT = 5000;
 
-<script>
-async function fetchPods() {
-    try {
-        const response = await fetch('/api/pods');
-        const data = await response.json();
-        const tableBody = document.querySelector('#podsTable tbody');
-        tableBody.innerHTML = '';
-
-        if (data.items && Array.isArray(data.items)) {
-            data.items.forEach(pod => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${pod.metadata.name}</td>
-                    <td>${pod.metadata.namespace}</td>
-                    <td>${pod.status.phase}</td>
-                    <td>${new Date(pod.metadata.creationTimestamp).toLocaleString()}</td>
-                `;
-                tableBody.appendChild(row);
-            });
+// Fonction pour servir un fichier statique
+function serveFile(res, filePath, contentType) {
+    fs.readFile(filePath, (err, content) => {
+        if (err) {
+            res.writeHead(500);
+            res.end('Erreur serveur');
         } else {
-            tableBody.innerHTML = '<tr><td colspan="4">Aucun pod trouvé.</td></tr>';
+            res.writeHead(200, { 'Content-Type': contentType });
+            res.end(content);
         }
-    } catch (error) {
-        console.error('Erreur lors de la récupération des pods:', error);
-    }
+    });
 }
 
-// Charger au démarrage
-fetchPods();
+const server = http.createServer((req, res) => {
+    if (req.url === '/api/pods') {
+        exec('kubectl get pods -A -o json', (error, stdout, stderr) => {
+            if (error) {
+                console.error('Erreur exec:', error);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Erreur récupération pods' }));
+                return;
+            }
+            try {
+                const pods = JSON.parse(stdout);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(pods));
+            } catch (err) {
+                console.error('Erreur parsing JSON:', err);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Erreur parsing JSON' }));
+            }
+        });
+    } else if (req.url === '/' || req.url === '/index.html') {
+        const filePath = path.join(__dirname, 'frontend', 'index.html');
+        serveFile(res, filePath, 'text/html');
+    } else if (req.url.endsWith('.css')) {
+        const filePath = path.join(__dirname, 'frontend', req.url);
+        serveFile(res, filePath, 'text/css');
+    } else if (req.url.endsWith('.js')) {
+        const filePath = path.join(__dirname, 'frontend', req.url);
+        serveFile(res, filePath, 'application/javascript');
+    } else {
+        res.writeHead(404);
+        res.end('404 Not Found');
+    }
+});
 
-// Auto-refresh (optionnel)
-setInterval(fetchPods, 10000);
-</script>
-
-</body>
-</html>
+server.listen(PORT, () => {
+    console.log(`Serveur démarré sur http://localhost:${PORT}`);
+});
